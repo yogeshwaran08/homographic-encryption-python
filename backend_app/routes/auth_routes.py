@@ -1,0 +1,110 @@
+from backend_app.utils.fhe_utils import FHE
+from backend_app.utils.mkhe import multi_key_encryption
+from backend_app.utils.skhe import single_key_encryption
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from backend_app.controllers.auth_controller import create_user, get_user, verify_password
+from backend_app.dantic.Auth import UserCreate, UserLogin
+from backend_app.database import SessionLocal
+from backend_app.controllers.jwt import create_access_token, get_current_user
+from backend_app.models.models import User
+from backend_app.utils.phe_utils import  PartialHomomorphicEnc
+
+router = APIRouter()
+
+class UploadContent(BaseModel):
+    content: str
+    mode: str
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@router.post("/register")
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    existing_user = get_user(db, user.username)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+
+    new_user = create_user(db=db, username=user.username, password=user.password)
+    
+    access_token = create_access_token(data={"sub": new_user.username})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "id": new_user.id,
+        "username": new_user.username
+    }
+
+@router.post("/login")
+def login(user: UserLogin, db: Session = Depends(get_db)):
+    user_data = get_user(db, user.username)
+    if not user_data or not verify_password(user.password, user_data.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    access_token = create_access_token(data={"sub": user_data.username})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "id": user_data.id,
+        "username": user_data.username
+    }
+
+@router.get("/about-me")
+def get_user_data(current_user: str = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == current_user).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"id": user.id, "username": user.username}
+
+
+@router.post("/user/uploads")
+def encrypt(
+    content: UploadContent, 
+    current_user: str = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    data = content.content
+    mode = content.mode
+    print("mode", mode)
+    if(mode == "phe"):
+        he = PartialHomomorphicEnc()
+
+        encrypted_data = he.encrypt(data)
+        decrypted_data = he.decrypt(encrypted_data["original"])
+
+        enc_metrics = he.enc_metrics
+        dec_metrics = he.dec_metrics
+
+        return {
+            "message": "Content pros ",
+            "original_content": data,
+            "decrypted_content": decrypted_data,
+            "encrypted_content": encrypted_data["encrypted"],
+            "encryption_metrics": enc_metrics,
+            "decryption_metrics": dec_metrics,
+        }
+    elif mode == "skhe":
+        metrics = single_key_encryption(content.content)
+        return metrics
+
+    elif mode == "mkhe":
+        metrics = multi_key_encryption("Hello")
+        return metrics
+    
+    elif mode == "fhe":
+        metrics = FHE(content.content)
+        return metrics
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid mode. Accepted values are: 'phe', 'skhe', 'mkhe', 'fhe'."
+        )
+     

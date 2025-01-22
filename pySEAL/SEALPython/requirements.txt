@@ -1,0 +1,12 @@
+pybind11
+cppimport
+jupyter
+fastapi
+uvicorn[standard]
+bcrypt
+sqlalchemy
+passlib
+jwt
+python-jose
+psutil
+phe

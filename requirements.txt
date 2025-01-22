@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+bcrypt
+sqlalchemy
+passlib
+jwt
+python-jose
+psutil
+phe
