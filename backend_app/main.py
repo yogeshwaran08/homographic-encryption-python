@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware  
 from backend_app.routes import auth_routes
+from backend_app.routes import encryption_routes
 from backend_app.database import Base, engine
-import seal
+from backend_app.models.models import User, Uploads
 
 Base.metadata.create_all(bind=engine)
 
@@ -17,3 +18,4 @@ app.add_middleware(
 )
 
 app.include_router(auth_routes.router)
+app.include_router(encryption_routes.router)

@@ -4,7 +4,7 @@
 FROM ubuntu:18.04
 
 # Install binary dependencies
-RUN apt-get -qqy update && apt-get install -qqy \
+RUN apt-get update && apt-get install -y \
     g++ \
     git \
     make \

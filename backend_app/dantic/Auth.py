@@ -8,3 +8,10 @@ class UserLogin(BaseModel):
 class UserCreate(BaseModel):
     username: str
     password: str
+
+class UploadContent(BaseModel):
+    content: str
+    filename: str 
+
+class DecryptContetn(BaseModel):
+    upload_id: int
