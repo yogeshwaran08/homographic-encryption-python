@@ -1,115 +1,127 @@
-import time
-import sys
+from backend_app.models.models import Uploads
 import seal
+from seal import EncryptionParameters, SEALContext, KeyGenerator, IntegerEncoder, Encryptor, Decryptor, Ciphertext, Plaintext
 import pickle
-from seal import EncryptionParameters, SEALContext, KeyGenerator, IntegerEncoder, Encryptor, Decryptor, Evaluator, Ciphertext, Plaintext, PublicKey, SecretKey
+from sqlalchemy.orm import Session
 
-def multi_key_encryption(input_string):
-    start_encrypt_time = time.time()
 
-    parms = EncryptionParameters()
-    parms.set_poly_modulus("1x^2048 + 1")
-    parms.set_coeff_modulus(seal.coeff_modulus_128(2048))
-    parms.set_plain_modulus(1 << 8)  # Plaintext modulus
+class MultiKeyHE:
+    def __init__(self):
+        self.context = None
+        self.keys = {}
+        self.encoder = None
 
-    context = SEALContext(parms)
-    keygen = KeyGenerator(context)
-    
-    # Generate two key pairs (public and secret) for multi-key encryption
-    public_key_1 = keygen.public_key()
-    secret_key_1 = keygen.secret_key()
-    keygen_2 = KeyGenerator(context)
-    public_key_2 = keygen_2.public_key()
-    secret_key_2 = keygen_2.secret_key()
+    def setup_context(self):
+        """Set up SEAL context and initialize encryption parameters."""
+        parms = EncryptionParameters()
+        parms.set_poly_modulus("1x^2048 + 1")
+        parms.set_coeff_modulus(seal.coeff_modulus_128(2048))
+        parms.set_plain_modulus(1 << 8)
 
-    # Create encryptors and decryptors
-    encryptor_1 = Encryptor(context, public_key_1)
-    encryptor_2 = Encryptor(context, public_key_2)
-    decryptor_1 = Decryptor(context, secret_key_1)
-    decryptor_2 = Decryptor(context, secret_key_2)
+        self.context = SEALContext(parms)
+        self.encoder = IntegerEncoder(self.context.plain_modulus())
 
-    evaluator = Evaluator(context)
-    encoder = IntegerEncoder(context.plain_modulus())
+    def generate_keys(self, user_id: int):
+        """Generate and store public and secret keys for a specific user."""
+        if not self.context:
+            self.setup_context()
 
-    # Convert input string to ASCII values
-    ascii_values = [ord(c) for c in input_string]
-    print("ASCII Values:", ascii_values)
+        keygen = KeyGenerator(self.context)
+        self.keys[user_id] = {
+            "public_key": keygen.public_key(),
+            "secret_key": keygen.secret_key()
+        }
 
-    # Encrypt the ASCII values with different public keys
-    ciphertexts_1 = []
-    ciphertexts_2 = []
+    def encrypt(self, input_string: str, user_id: int):
+        """Encrypts a string using the public key of a specific user."""
+        if user_id not in self.keys:
+            self.generate_keys(user_id)
 
-    for value in ascii_values:
-        plaintext = encoder.encode(value)
-        
-        # Encrypt using the first public key
-        ciphertext_1 = Ciphertext()
-        encryptor_1.encrypt(plaintext, ciphertext_1)
-        ciphertexts_1.append(ciphertext_1)
+        public_key = self.keys[user_id]["public_key"]
+        encryptor = Encryptor(self.context, public_key)
 
-        # Encrypt using the second public key
-        ciphertext_2 = Ciphertext()
-        encryptor_2.encrypt(plaintext, ciphertext_2)
-        ciphertexts_2.append(ciphertext_2)
+        ascii_values = [ord(c) for c in input_string]
+        ciphertexts = []
 
-    encryption_memory = sum(sys.getsizeof(c) for c in ciphertexts_1 + ciphertexts_2)
-    
-    end_encrypt_time = time.time()
-    encryption_time = end_encrypt_time - start_encrypt_time
+        for value in ascii_values:
+            plaintext = self.encoder.encode(value)
+            ciphertext = Ciphertext()
+            encryptor.encrypt(plaintext, ciphertext)
+            ciphertexts.append(ciphertext)
 
-    print("Encrypted ciphertexts (Key 1):", ciphertexts_1)
-    print("Encrypted ciphertexts (Key 2):", ciphertexts_2)
+        serialized_ciphertexts = pickle.dumps(ciphertexts)
 
-    start_decrypt_time = time.time()
+        serialized_data = {
+            "ciphertexts": serialized_ciphertexts,
+            "user_id": user_id,
+            "context": pickle.dumps(self.context),
+            "keys": self.keys
+        }
 
-    decrypted_string = ""
+        return serialized_data
 
-    # Decrypt ciphertexts using the corresponding secret keys
-    for c1, c2 in zip(ciphertexts_1, ciphertexts_2):
-        decrypted_plaintext_1 = Plaintext()
-        decrypted_plaintext_2 = Plaintext()
+    def decrypt(self, encryption_result):
+        """Decrypts ciphertexts using the secret key of the user."""
+        serialized_ciphertexts = encryption_result["ciphertexts"]
+        user_id = encryption_result["user_id"]
 
-        decryptor_1.decrypt(c1, decrypted_plaintext_1)
-        decryptor_2.decrypt(c2, decrypted_plaintext_2)
+        if user_id not in self.keys:
+            raise ValueError(f"No keys found for user ID: {user_id}")
 
-        # Decode the decrypted values
-        decrypted_number_1 = encoder.decode_int32(decrypted_plaintext_1)
-        decrypted_number_2 = encoder.decode_int32(decrypted_plaintext_2)
+        secret_key = self.keys[user_id]["secret_key"]
+        decryptor = Decryptor(self.context, secret_key)
+        ciphertexts = pickle.loads(serialized_ciphertexts)
 
-        # Convert the numbers back to characters and build the decrypted string
-        decrypted_string += chr(decrypted_number_1) + chr(decrypted_number_2)
+        decrypted_string = ""
 
-    decryption_memory = sum(sys.getsizeof(p) for p in decrypted_string)
+        for ciphertext in ciphertexts:
+            decrypted_plaintext = Plaintext()
+            decryptor.decrypt(ciphertext, decrypted_plaintext)
+            decrypted_number = self.encoder.decode_int32(decrypted_plaintext)
+            decrypted_string += chr(decrypted_number)
 
-    end_decrypt_time = time.time()
-    decryption_time = end_decrypt_time - start_decrypt_time
+        return decrypted_string
 
-    print("Decrypted string:", decrypted_string)
+    def save_to_db(self, filename: str, encryption_result: dict, db_session: Session, user_id: int):
+        """Saves encrypted data into the database."""
+        encrypted_content = pickle.dumps({
+            "ciphertexts": encryption_result['ciphertexts'],
+            "user_id": user_id,
+            "context": encryption_result['context'],
+            "keys": encryption_result['keys']
+        })
 
-    throughput_encrypt = (len(input_string) * 8) / encryption_time if encryption_time > 0 else 0
-    throughput_decrypt = (len(input_string) * 8) / decryption_time if decryption_time > 0 else 0
+        upload = Uploads(
+            user_id=user_id,
+            contents=encrypted_content,
+            type="mkhe",
+            fileName=filename
+        )
 
-    enc_metrics = {
-        'time_taken': encryption_time,
-        'memory_usage': encryption_memory,
-        'throughput': throughput_encrypt
-    }
-    
-    dec_metrics = {
-        'time_taken': decryption_time,
-        'memory_usage': decryption_memory,
-        'throughput': throughput_decrypt
-    }
+        db_session.add(upload)
+        db_session.commit()
+        return upload
 
-    # Serialize ciphertexts for transport
-    serialized_ciphertexts_1 = pickle.dumps(ciphertexts_1)
-    serialized_ciphertexts_2 = pickle.dumps(ciphertexts_2)
+    def load_from_db(self, db_session: Session, upload_id: int):
+        upload = db_session.query(Uploads).filter(
+            Uploads.id == upload_id).first()
 
-    return {
-        "message": "Content processed",
-        "original_content": input_string,
-        "decrypted_content": decrypted_string,
-        "encrypted_content": [str(serialized_ciphertexts_1), str(serialized_ciphertexts_2)],  
-        "encryption_metrics": enc_metrics,
-        "decryption_metrics": dec_metrics,
-    }
+        if upload:
+            encrypted_content = pickle.loads(upload.contents)
+
+            context = pickle.loads(encrypted_content["context"])
+            keys = encrypted_content["keys"]
+
+            self.context = context
+            self.keys = keys
+
+            encryption_result = {
+                "ciphertexts": encrypted_content["ciphertexts"],
+                "user_id": encrypted_content["user_id"]
+            }
+
+            print(f"Encrypted data loaded from database (ID: {upload_id})")
+            return encryption_result, upload.user_id
+        else:
+            print(f"No encrypted data found with ID: {upload_id}")
+            return None

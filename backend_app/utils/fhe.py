@@ -5,18 +5,15 @@ import pickle
 from sqlalchemy.orm import Session
 
 
-class SingleKeyHE:
+class FullHomomorphicEncryption:
     def __init__(self):
         self.context = None
         self.public_key = None
         self.secret_key = None
         self.encoder = None
-        self.encryption_time = None
-        self.decryption_time = None
-        self.throughput = None
-        self.memory_usage = None
 
     def setup_context(self):
+        """Setup the SEAL context and generate keys."""
         parms = EncryptionParameters()
         parms.set_poly_modulus("1x^2048 + 1")
         parms.set_coeff_modulus(seal.coeff_modulus_128(2048))
@@ -29,6 +26,7 @@ class SingleKeyHE:
         self.encoder = IntegerEncoder(self.context.plain_modulus())
 
     def encrypt(self, input_string):
+        """Encrypts a string using SEAL."""
         if not self.context or not self.public_key or not self.encoder:
             self.setup_context()
 
@@ -52,6 +50,7 @@ class SingleKeyHE:
         }
 
     def decrypt(self, encryption_result):
+        """Decrypts ciphertexts back into a string."""
         serialized_ciphertexts = encryption_result["ciphertexts"]
         secret_key = pickle.loads(encryption_result["secret_key"])
         context = encryption_result["context"]
@@ -69,6 +68,7 @@ class SingleKeyHE:
         return decrypted_string
 
     def save_to_db(self, filename, encryption_result, db_session: Session, user_id: int):
+        """Saves the encryption result to the database."""
         encrypted_content = pickle.dumps({
             "ciphertexts": encryption_result['ciphertexts'],
             "secret_key": encryption_result['secret_key'],
@@ -78,7 +78,7 @@ class SingleKeyHE:
         upload = Uploads(
             user_id=user_id,
             contents=encrypted_content,
-            type="skhe",
+            type="fhe",
             fileName=filename
         )
 
@@ -87,6 +87,7 @@ class SingleKeyHE:
         return upload
 
     def load_from_db(self, db_session: Session, upload_id: int):
+        """Loads encrypted data from the database."""
         upload = db_session.query(Uploads).filter(
             Uploads.id == upload_id).first()
 
