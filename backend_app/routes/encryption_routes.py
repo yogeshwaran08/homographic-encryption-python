@@ -14,6 +14,8 @@ from sqlalchemy.orm import sessionmaker
 import time
 import psutil
 import os
+import tracemalloc
+
 
 
 router = APIRouter()
@@ -49,17 +51,20 @@ def encrypt_skhe(
     seal_encryption = SingleKeyHE()
 
     start_time = time.time()
-    process = psutil.Process(os.getpid())
-    start_memory = process.memory_info().rss
+    # process = psutil.Process(os.getpid())
+    # start_memory = process.memory_info().rss
+    tracemalloc.start()
 
     encryption_result = seal_encryption.encrypt(content.content)
 
     end_time = time.time()
-    end_memory = process.memory_info().rss
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
     content_size = len(content.content) / (1024 * 1024)
 
     time_taken = end_time - start_time
-    memory_usage = (end_memory - start_memory) / (1024 * 1024)
+    memory_usage = peak / (1024 * 1024) 
+    # memory_usage = (end_memory - start_memory) / (1024 * 1024)
     throughput = content_size / start_time
 
     uploaded = seal_encryption.save_to_db(
@@ -111,22 +116,24 @@ def encrypt_phe(
     db = SessionLocal()
     seal_encryption = PartialHomomorphicEncryption()
 
+    # Start memory tracking
+    tracemalloc.start()
     start_time = time.time()
-    process = psutil.Process(os.getpid())
-    start_memory = process.memory_info().rss
 
     encryption_result = seal_encryption.encrypt(content.content)
 
     end_time = time.time()
-    end_memory = process.memory_info().rss
-    content_size = len(content.content) / (1024 * 1024)
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
 
+    content_size = len(content.content) / (1024 * 1024)
     time_taken = end_time - start_time
-    memory_usage = (end_memory - start_memory) / (1024 * 1024)
-    throughput = content_size / start_time
+    memory_usage = peak / (1024 * 1024) 
+    throughput = content_size / time_taken if time_taken > 0 else 0
 
     uploaded = seal_encryption.save_to_db(
-        content.filename, encryption_result, db, user_id=current_user["user_id"])
+        content.filename, encryption_result, db, user_id=current_user["user_id"]
+    )
 
     return {
         "metrics": {
@@ -134,7 +141,7 @@ def encrypt_phe(
             "encryptedContent": str(uploaded.contents),
             "encryption_metrics": {
                 "time_taken": time_taken,
-                "memory_usage": memory_usage,
+                "memory_usage": memory_usage,  
                 "throughput": throughput
             }
         },
@@ -176,17 +183,17 @@ def encrypt_fhe(
     seal_encryption = FullHomomorphicEncryption()
 
     start_time = time.time()
-    process = psutil.Process(os.getpid())
-    start_memory = process.memory_info().rss
+    tracemalloc.start()
+
 
     encryption_result = seal_encryption.encrypt(content.content)
-
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
     end_time = time.time()
-    end_memory = process.memory_info().rss
     content_size = len(content.content) / (1024 * 1024)
+    memory_usage = peak / (1024 * 1024) 
 
     time_taken = end_time - start_time
-    memory_usage = (end_memory - start_memory) / (1024 * 1024)
     throughput = content_size / start_time
 
     uploaded = seal_encryption.save_to_db(
@@ -239,19 +246,19 @@ def encrypt_mkhe(
     seal_encryption = MultiKeyHE()
 
     start_time = time.time()
-    process = psutil.Process(os.getpid())
-    start_memory = process.memory_info().rss
+    tracemalloc.start()
+    
 
     encryption_result = seal_encryption.encrypt(
         content.content, current_user["user_id"])
-
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
     end_time = time.time()
-    end_memory = process.memory_info().rss
     content_size = len(content.content) / (1024 * 1024)
 
     time_taken = end_time - start_time
-    memory_usage = (end_memory - start_memory) / (1024 * 1024)
     throughput = content_size / start_time
+    memory_usage = peak / (1024 * 1024) 
 
     uploaded = seal_encryption.save_to_db(
         content.filename, encryption_result, db, user_id=current_user["user_id"])
